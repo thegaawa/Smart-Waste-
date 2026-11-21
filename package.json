@@ -1,0 +1,33 @@
+{
+  "name": "smart-waste",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smart-Waste: a cloud and mobile-enabled platform for community-based urban waste monitoring and management in Lagos State",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "postinstall": "npm run build -w @smart-waste/shared",
+    "build:shared": "npm run build -w @smart-waste/shared",
+    "db:start": "npm run db:start -w @smart-waste/api",
+    "db:migrate": "npm run db:migrate -w @smart-waste/api",
+    "db:seed": "npm run db:seed -w @smart-waste/api",
+    "api": "npm run dev -w @smart-waste/api",
+    "admin": "npm run dev -w @smart-waste/admin",
+    "mobile": "npm run start -w @smart-waste/mobile",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "allowScripts": {
+    "prisma": true,
+    "@prisma/engines": true,
+    "@embedded-postgres/darwin-x64": true,
+    "esbuild": true,
+    "fsevents": true
+  }
+}

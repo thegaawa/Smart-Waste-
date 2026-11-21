@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.expo/
+web-build/
+
+# Environment files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Local database data (embedded PostgreSQL)
+.pgdata/
+
+# Report photos stored on local disk during development
+apps/api/uploads/
+
+# Generated Prisma client
+apps/api/src/generated/
+
+# Logs and caches
+*.log
+npm-debug.log*
+.cache/
+.turbo/
+coverage/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Mobile native folders (Expo prebuild output; regenerated on demand)
+apps/mobile/android/
+apps/mobile/ios/
+
+# Firebase push notifications: app config and the API's private service-account key
+apps/mobile/google-services.json
+apps/api/firebase-service-account.json
+
+# Device screenshots taken during testing (see project rule)
+redmi-*.png

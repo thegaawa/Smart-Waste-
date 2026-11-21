@@ -1,0 +1,13 @@
+# Railway service config for the Smart-Waste API.
+# Create a volume mounted at /data so report photos survive restarts.
+# Set UPLOADS_DIR=/data/uploads in the service variables.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
