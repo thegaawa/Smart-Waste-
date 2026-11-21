@@ -1,0 +1,252 @@
+// Smart-Waste database schema (Table 3.3 of the project document, plus the
+// additions agreed for implementation: reference number, idempotency key,
+// resolved/closed timestamps, assignment status, indexes, refresh tokens).
+//
+// Table and column names are snake_case in PostgreSQL (see @@map / @map);
+// the TypeScript client uses camelCase.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enumerations (kept in step with @smart-waste/shared)
+// ---------------------------------------------------------------------------
+
+enum Role {
+  CITIZEN
+  FIELD
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ReportStatus {
+  NEW
+  VALIDATED
+  REJECTED
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACKNOWLEDGED
+  COMPLETED
+  REASSIGNED
+}
+
+enum MediaType {
+  IMAGE
+}
+
+// ---------------------------------------------------------------------------
+// Users (citizen, field and administrator accounts)
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(uuid(7))
+  name         String
+  email        String?    @unique
+  phone        String?    @unique
+  passwordHash String     @map("password_hash")
+  role         Role       @default(CITIZEN)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  reports         WasteReport[]
+  assignments     Assignment[]    @relation("AssignmentAssignee")
+  assignmentsMade Assignment[]    @relation("AssignmentAssignedBy")
+  statusChanges   StatusHistory[]
+  notifications   Notification[]
+  refreshTokens   RefreshToken[]
+  pushDevices     PushDevice[]
+
+  @@map("users")
+}
+
+// Phones that receive push notifications (Chapter 4.3.5: in-app notifications
+// extended to push). One row per device; a device belongs to the account that
+// last signed in on it, so a shared phone never gets someone else's alerts.
+model PushDevice {
+  id         String   @id @default(uuid(7))
+  userId     String   @map("user_id")
+  /// Native FCM (Android) or APNs (iOS) registration token.
+  token      String   @unique
+  platform   String
+  appVersion String?  @map("app_version")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_devices")
+}
+
+// Login sessions are kept apart from operational records (Chapter 3.9).
+model RefreshToken {
+  id        String    @id @default(uuid(7))
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Configurable waste-report categories
+// ---------------------------------------------------------------------------
+
+model Category {
+  id              String   @id @default(uuid(7))
+  name            String   @unique
+  description     String?
+  defaultPriority Priority @default(MEDIUM) @map("default_priority")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  reports WasteReport[]
+
+  @@map("categories")
+}
+
+// ---------------------------------------------------------------------------
+// Core waste-incident record
+// ---------------------------------------------------------------------------
+
+model WasteReport {
+  id             String       @id @default(uuid(7))
+  /// Human-friendly reference such as SW-1042 (FR-04). Generated from the
+  /// report_reference_seq sequence inside the create transaction.
+  reference      String       @unique
+  userId         String       @map("user_id")
+  categoryId     String       @map("category_id")
+  description    String
+  latitude       Float
+  longitude      Float
+  address        String?
+  status         ReportStatus @default(NEW)
+  priority       Priority     @default(MEDIUM)
+  /// Client-generated key so a retried submission never creates a duplicate.
+  idempotencyKey String?      @map("idempotency_key")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  validatedAt    DateTime?    @map("validated_at")
+  resolvedAt     DateTime?    @map("resolved_at")
+  closedAt       DateTime?    @map("closed_at")
+
+  user     User     @relation(fields: [userId], references: [id])
+  category Category @relation(fields: [categoryId], references: [id])
+
+  media         ReportMedia[]
+  assignments   Assignment[]
+  history       StatusHistory[]
+  notifications Notification[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([categoryId])
+  @@index([priority])
+  @@map("waste_reports")
+}
+
+// Photographs attached to a report. Stored in object storage; the database
+// keeps only the storage key and clients receive time-limited signed URLs.
+model ReportMedia {
+  id         String    @id @default(uuid(7))
+  reportId   String    @map("report_id")
+  storageKey String    @map("storage_key")
+  mediaType  MediaType @default(IMAGE) @map("media_type")
+  mimeType   String    @map("mime_type")
+  sizeBytes  Int       @map("size_bytes")
+  uploadedAt DateTime  @default(now()) @map("uploaded_at")
+
+  report WasteReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_media")
+}
+
+// Operational assignment of a report to a field officer.
+model Assignment {
+  id             String           @id @default(uuid(7))
+  reportId       String           @map("report_id")
+  assigneeId     String           @map("assignee_id")
+  assignedById   String           @map("assigned_by_id")
+  status         AssignmentStatus @default(PENDING)
+  note           String?
+  assignedAt     DateTime         @default(now()) @map("assigned_at")
+  dueAt          DateTime?        @map("due_at")
+  acknowledgedAt DateTime?        @map("acknowledged_at")
+  completedAt    DateTime?        @map("completed_at")
+
+  report     WasteReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  assignee   User        @relation("AssignmentAssignee", fields: [assigneeId], references: [id])
+  assignedBy User        @relation("AssignmentAssignedBy", fields: [assignedById], references: [id])
+
+  @@index([assigneeId, status])
+  @@index([reportId])
+  @@map("assignments")
+}
+
+// Auditable report life cycle (FR-10).
+model StatusHistory {
+  id          String        @id @default(uuid(7))
+  reportId    String        @map("report_id")
+  oldStatus   ReportStatus? @map("old_status")
+  newStatus   ReportStatus  @map("new_status")
+  changedById String?       @map("changed_by_id")
+  note        String?
+  changedAt   DateTime      @default(now()) @map("changed_at")
+
+  report    WasteReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  changedBy User?       @relation(fields: [changedById], references: [id])
+
+  @@index([reportId, changedAt])
+  @@map("status_history")
+}
+
+// In-app notification events (FR-08).
+model Notification {
+  id        String   @id @default(uuid(7))
+  userId    String   @map("user_id")
+  reportId  String?  @map("report_id")
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report WasteReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
+}
